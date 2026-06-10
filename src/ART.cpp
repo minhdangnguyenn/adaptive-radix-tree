@@ -18,12 +18,15 @@ __attribute__((hot)) uint64_t ART::lookup(Key &k) {
             return Node::getLeafValue(node);
         }
 
+        // skip compressed prefix in one jump
         uint32_t next_depth = depth + node->prefix_len;
 
+        // find child for the next key byte
         Node **child = node->findChild(k[next_depth]);
         if (child == nullptr || *child == nullptr)
             return NULL_;
 
+        // descend, advance past prefix and consumed byte
         depth = next_depth + 1;
         node = *child;
     }
@@ -50,7 +53,6 @@ __attribute__((hot)) bool ART::insert(Key &k, uint64_t value) {
 
             uint32_t common_prefix_len = 0;
             uint32_t common_limit = std::min(k.getKeyLen(), k2.getKeyLen());
-
             while (depth + common_prefix_len < common_limit &&
                    k[depth + common_prefix_len] ==
                        k2[depth + common_prefix_len]) {
@@ -67,22 +69,24 @@ __attribute__((hot)) bool ART::insert(Key &k, uint64_t value) {
             return true;
         }
 
-        uint32_t prefix_match = this->checkPrefix(node, k, depth);
+        uint32_t prefix_match_length = this->checkPrefix(node, k, depth);
 
-        if (prefix_match != node->prefix_len) {
+        if (prefix_match_length != node->prefix_len) {
             // prefix mismatch — split inner node, redirect parent
             Node4 *nn4 = new Node4();
-            nn4->prefix_len = prefix_match;
-            memcpy(nn4->prefix, &k[depth], prefix_match);
+            nn4->prefix_len = prefix_match_length;
+            memcpy(nn4->prefix, &k[depth], prefix_match_length);
 
             // I do same as in the paper
-            node->prefix_len = node->prefix_len - prefix_match - 1;
-            memmove(node->prefix, node->prefix + prefix_match + 1,
+            node->prefix_len = node->prefix_len - prefix_match_length - 1;
+            memmove(node->prefix, node->prefix + prefix_match_length + 1,
                     node->prefix_len);
 
             *ptr_in_parent = nn4; // ( = replace() in pseudo code in paper)
-            nn4->addChild(ptr_in_parent, k[depth + prefix_match], new_leaf);
-            nn4->addChild(ptr_in_parent, node->prefix[prefix_match], node);
+            nn4->addChild(ptr_in_parent, k[depth + prefix_match_length],
+                          new_leaf);
+            nn4->addChild(ptr_in_parent, node->prefix[prefix_match_length],
+                          node);
             return true;
         }
 
