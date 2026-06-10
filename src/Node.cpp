@@ -4,9 +4,9 @@
 Node **Node4::findChild(uint8_t keyByte) {
     if (child_num > 0 && keys[0] == keyByte)
         return &children[0];
-    if (child_num > 1 && keys[1] == keyByte)
+    else if (child_num > 1 && keys[1] == keyByte)
         return &children[1];
-    if (child_num > 2 && keys[2] == keyByte)
+    else if (child_num > 2 && keys[2] == keyByte)
         return &children[2];
     return child_num > 3 && keys[3] == keyByte ? &children[3] : nullptr;
 }
@@ -32,7 +32,6 @@ void Node4::addChild(Node **ptr_in_parent, uint8_t keyByte, Node *child) {
         memcpy(nn16->children, this->children, 4 * sizeof(Node *));
 
         nn16->child_num = 4;
-        nn16->next_pos = 4;
         nn16->addChild(ptr_in_parent, keyByte, child);
 
         *ptr_in_parent = nn16;
@@ -62,10 +61,9 @@ Node **Node16::findChild(uint8_t keyByte) {
 
 void Node16::addChild(Node **ptr_in_parent, uint8_t keyByte, Node *child) {
     if (this->child_num < 16) {
-        keys[this->next_pos] = keyByte;
-        children[this->next_pos] = child;
-        this->next_pos++;
-        child_num++;
+        keys[this->child_num] = keyByte;
+        children[this->child_num] = child;
+        this->child_num++;
     }
     // else node16 becomes node48
     else {
@@ -77,7 +75,6 @@ void Node16::addChild(Node **ptr_in_parent, uint8_t keyByte, Node *child) {
             nn48->children[i] = this->children[i];
         }
         nn48->child_num = 16;
-        nn48->next_pos = 16;
         nn48->addChild(ptr_in_parent, keyByte, child);
         *ptr_in_parent = nn48;
         memset(this->children, 0, sizeof(this->children));
@@ -95,9 +92,8 @@ Node **Node48::findChild(uint8_t keyByte) {
 
 void Node48::addChild(Node **ptr_in_parent, uint8_t keyByte, Node *child) {
     if (this->child_num < 48) {
-        this->child_index[keyByte] = this->next_pos;
-        this->children[this->next_pos] = child;
-        this->next_pos++;
+        this->child_index[keyByte] = this->child_num;
+        this->children[this->child_num] = child;
         child_num++;
     } else {
         Node256 *nn256 = new Node256();

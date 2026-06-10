@@ -81,11 +81,9 @@ class Node16 : public Node {
   public:
     uint8_t keys[16];
     Node *children[16];
-    uint8_t next_pos;
     Node16() : Node(NodeTypes::N16) {
         memset(keys, 0, sizeof(keys));
         memset(children, 0, sizeof(children));
-        this->next_pos = 0;
     }
     ~Node16() {
         for (uint32_t i = 0; i < 16; ++i)
@@ -100,12 +98,10 @@ class Node48 : public Node {
   public:
     uint8_t child_index[256];
     Node *children[48];
-    uint8_t next_pos;
     inline static uint8_t EMPTY = 48;
     Node48() : Node(NodeTypes::N48) {
         memset(child_index, EMPTY, sizeof(child_index));
         memset(children, 0, sizeof(children));
-        next_pos = 0;
     }
     ~Node48() {
         for (uint32_t i = 0; i < 48; ++i)

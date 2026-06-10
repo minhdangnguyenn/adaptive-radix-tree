@@ -11,7 +11,6 @@ const uint64_t NULL_ = (uint64_t)-1;
 __attribute__((hot)) uint64_t ART::lookup(Key &k) {
     Node *node = this->root;
     uint32_t depth = 0;
-    const uint32_t key_len = k.getKeyLen();
 
     while (node != nullptr) {
         // I checked every prefix path so I dont need to check the leaf :D
@@ -20,8 +19,6 @@ __attribute__((hot)) uint64_t ART::lookup(Key &k) {
         }
 
         uint32_t next_depth = depth + node->prefix_len;
-        if (next_depth >= key_len)
-            return NULL_;
 
         Node **child = node->findChild(k[next_depth]);
         if (child == nullptr || *child == nullptr)
@@ -78,15 +75,12 @@ __attribute__((hot)) bool ART::insert(Key &k, uint64_t value) {
             nn4->prefix_len = prefix_match;
             memcpy(nn4->prefix, &k[depth], prefix_match);
 
-            // old node keeps the suffix after the split byte
-            // uint32_t new_old_prefix_len = node->prefix_len - prefix_match -
-            // 1;
             // I do same as in the paper
             node->prefix_len = node->prefix_len - prefix_match - 1;
             memmove(node->prefix, node->prefix + prefix_match + 1,
                     node->prefix_len);
 
-            *ptr_in_parent = nn4; // = replace() (same as paper)
+            *ptr_in_parent = nn4; // ( = replace() in pseudo code in paper)
             nn4->addChild(ptr_in_parent, k[depth + prefix_match], new_leaf);
             nn4->addChild(ptr_in_parent, node->prefix[prefix_match], node);
             return true;
