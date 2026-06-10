@@ -1,121 +1,134 @@
-#include "../include/Node.h"
-#include <smmintrin.h>
+#include "../include/ART.h"
+#include <emmintrin.h>
 
-Node **Node4::findChild(uint8_t keyByte) {
-    if (this->child_num > 0 && keys[0] == keyByte)
-        return &children[0];
-    else if (this->child_num > 1 && keys[1] == keyByte)
-        return &children[1];
-    else if (this->child_num > 2 && keys[2] == keyByte)
-        return &children[2];
-    return this->child_num > 3 && keys[3] == keyByte ? &this->children[3]
-                                                     : nullptr;
+ART::ART(Key *val2key, uint64_t val2key_len)
+    : root(nullptr), val2key(val2key), val2key_len(val2key_len) {}
+
+ART::~ART() {}
+
+const uint64_t NULL_ = (uint64_t)-1;
+
+__attribute__((hot)) uint64_t ART::lookup(Key &k) {
+    Node *node = this->root;
+    uint32_t depth = 0;
+
+    while (node != nullptr) {
+        // I checked every prefix path so I dont need to check the leaf :D
+        if (Node::isLeaf(node)) {
+            return Node::getLeafValue(node);
+        }
+
+        // skip compressed prefix in one jump
+        uint32_t next_depth = depth + node->prefix_len;
+
+        // find child for the next key byte
+        Node **child = node->findChild(k[next_depth]);
+        if (child == nullptr || *child == nullptr)
+            return NULL_;
+
+        // descend, advance past prefix and consumed byte
+        depth = next_depth + 1;
+        node = *child;
+    }
+    return NULL_;
 }
 
-void Node4::addChild(Node **ptr_in_parent, uint8_t keyByte, Node *child) {
-    if (this->child_num < 4) {
-        int pos = this->child_num;
-        while (pos > 0 && keys[pos - 1] > keyByte)
-            pos--;
-
-        memmove(this->keys + pos + 1, this->keys + pos, this->child_num - pos);
-        memmove(this->children + pos + 1, this->children + pos,
-                (this->child_num - pos) * sizeof(Node *));
-        this->keys[pos] = keyByte;
-        this->children[pos] = child;
-        this->child_num++;
+bool ART::insert(Key &k, uint64_t value) {
+    Node *new_leaf = Node::makeLeaf(value);
+    if (this->root == nullptr) [[unlikely]] {
+        // first insert, root becomes leaf
+        this->root = new_leaf;
+        return true;
     }
-    // else node4 becomes node16
-    else {
-        Node16 *nn16 = new Node16();
-        nn16->copyPrefix(this);
-        memcpy(nn16->keys, this->keys, 4);
-        memcpy(nn16->children, this->children, 4 * sizeof(Node *));
 
-        nn16->child_num = 4;
-        nn16->addChild(ptr_in_parent, keyByte, child);
+    Node *node = this->root;
+    Node **ptr_in_parent = &this->root;
+    uint32_t depth = 0;
 
-        *ptr_in_parent = nn16;
+    while (true) {
+        if (Node::isLeaf(node)) {
+            // hit leaf during descent — expand into inner node with both leaves
+            Node4 *nn4 = new Node4();
+            Key &k2 = this->val2key[Node::getLeafValue(node)]; // == loadKey()
 
-        memset(this->children, 0, sizeof(this->children));
-        delete this;
+            uint32_t common_prefix_len = 0;
+            uint32_t common_limit = std::min(k.getKeyLen(), k2.getKeyLen());
+            while (depth + common_prefix_len < common_limit &&
+                   k[depth + common_prefix_len] ==
+                       k2[depth + common_prefix_len]) {
+                common_prefix_len++;
+            }
+
+            nn4->prefix_len = common_prefix_len;
+            memcpy(nn4->prefix, &k[depth], common_prefix_len);
+
+            depth = depth + common_prefix_len;
+            nn4->addChild(ptr_in_parent, k[depth], new_leaf);
+            nn4->addChild(ptr_in_parent, k2[depth], node);
+            *ptr_in_parent = nn4;
+            return true;
+        }
+
+        uint32_t prefix_match_length = this->checkPrefix(node, k, depth);
+
+        if (prefix_match_length != node->prefix_len) {
+            // prefix mismatch — split inner node, redirect parent
+            Node4 *nn4 = new Node4();
+            nn4->prefix_len = prefix_match_length;
+
+            // I do same as in the paper
+            memcpy(nn4->prefix, &k[depth], prefix_match_length);
+
+            node->prefix_len = node->prefix_len - prefix_match_length - 1;
+            memmove(node->prefix, node->prefix + prefix_match_length + 1,
+                    node->prefix_len);
+
+            *ptr_in_parent = nn4; // ( = replace() in pseudo code in paper)
+            nn4->addChild(ptr_in_parent, k[depth + prefix_match_length],
+                          new_leaf);
+            nn4->addChild(ptr_in_parent, node->prefix[prefix_match_length],
+                          node);
+            return true;
+        }
+
+        // prefix matches fully — descend
+        depth += node->prefix_len;
+
+        Node **child_ptr = node->findChild(k[depth]);
+        Node *child = (child_ptr != nullptr) ? *child_ptr : nullptr;
+
+        if (child != nullptr) {
+            // found existing child — continue descent
+            ptr_in_parent = child_ptr;
+            node = child;
+            depth++;
+            continue;
+        }
+        // = else in paper
+        // no child for this key byte — add new leaf
+        node->addChild(ptr_in_parent, k[depth], new_leaf);
+        return true;
     }
 }
 
 /**
- * as described in the ART paper
- * use SIMD to find the child pointer corresponding to keyByte
- * return nullptr if not found
+ * compares the compressed path of a
+ * node with the key and returns the number of equal bytes
  */
-Node **Node16::findChild(uint8_t keyByte) {
-    __m128i key = _mm_set1_epi8(keyByte);
-    __m128i cmp = _mm_cmpeq_epi8(
-        key, _mm_loadu_si128(reinterpret_cast<const __m128i *>(keys)));
+inline __attribute__((always_inline)) uint32_t
+ART::checkPrefix(Node *node, Key &key, uint32_t depth) {
+    uint32_t node_prefix_len = node->prefix_len;
+    uint32_t cmp_limit = node_prefix_len;
 
-    uint16_t mask = (1u << child_num) - 1;
-    uint16_t bitfield = _mm_movemask_epi8(cmp) & mask;
-
-    if (bitfield)
-        return &this->children[__builtin_ctz(bitfield)];
-    return nullptr;
-}
-
-void Node16::addChild(Node **ptr_in_parent, uint8_t keyByte, Node *child) {
-    if (this->child_num < 16) {
-        this->keys[this->child_num] = keyByte;
-        this->children[this->child_num] = child;
-        this->child_num++;
+    uint32_t p = 0;
+    while (p < cmp_limit && node->prefix[p] == key[depth + p]) {
+        p++;
     }
-    // else node16 becomes node48
-    else {
-        Node48 *nn48 = new Node48();
-        nn48->copyPrefix(this);
-        for (int i = 0; i < 16; i++) {
-            uint8_t key = this->keys[i];
-            nn48->child_index[key] = i;
-            nn48->children[i] = this->children[i];
-        }
-        nn48->child_num = 16;
-        nn48->addChild(ptr_in_parent, keyByte, child);
-        *ptr_in_parent = nn48;
-        memset(this->children, 0, sizeof(this->children));
-        delete this;
+
+    if (p == cmp_limit) {
+        return node_prefix_len;
     }
-}
 
-Node **Node48::findChild(uint8_t keyByte) {
-    uint8_t index = this->child_index[keyByte];
-    if (index != EMPTY)
-        return &this->children[index];
-
-    return nullptr;
-}
-
-void Node48::addChild(Node **ptr_in_parent, uint8_t keyByte, Node *child) {
-    if (this->child_num < 48) {
-        this->child_index[keyByte] = this->child_num;
-        this->children[child_num] = child;
-        this->child_num++;
-    } else {
-        Node256 *nn256 = new Node256();
-        nn256->copyPrefix(this);
-        for (int i = 0; i < 256; i++) {
-            uint8_t slot = this->child_index[i];
-            if (slot != EMPTY)
-                nn256->children[i] = this->children[slot];
-        }
-        nn256->child_num = child_num;
-        nn256->addChild(ptr_in_parent, keyByte, child);
-        *ptr_in_parent = nn256;
-        memset(this->children, 0, sizeof(this->children));
-        delete this;
-    }
-}
-
-Node **Node256::findChild(uint8_t keyByte) { return &this->children[keyByte]; }
-
-void Node256::addChild(Node **ptr_in_parent, uint8_t keyByte, Node *child) {
-    this->child_num += (this->children[keyByte] == nullptr);
-    this->children[keyByte] = child;
+    return p;
 }
 
