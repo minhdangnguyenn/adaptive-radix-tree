@@ -23,8 +23,9 @@ __attribute__((hot)) uint64_t ART::lookup(Key &k) {
 
         // find child for the next key byte
         Node **child = node->findChild(k[next_depth]);
-        if (child == nullptr || *child == nullptr)
+        if (child == nullptr || *child == nullptr) {
             return NULL_;
+        }
 
         // descend, advance past prefix and consumed byte
         depth = next_depth + 1;
@@ -51,18 +52,17 @@ bool ART::insert(Key &k, uint64_t value) {
             Node4 *nn4 = new Node4();
             Key &k2 = this->val2key[Node::getLeafValue(node)]; // == loadKey()
 
-            uint32_t common_prefix_len = 0;
+            // uint32_t common_prefix_len = 0;
             uint32_t common_limit = std::min(k.getKeyLen(), k2.getKeyLen());
-            while (depth + common_prefix_len < common_limit &&
-                   k[depth + common_prefix_len] ==
-                       k2[depth + common_prefix_len]) {
-                common_prefix_len++;
+            while (depth + nn4->prefix_len < common_limit &&
+                   k[depth + nn4->prefix_len] == k2[depth + nn4->prefix_len]) {
+                nn4->prefix_len++;
             }
 
-            nn4->prefix_len = common_prefix_len;
-            memcpy(nn4->prefix, &k[depth], common_prefix_len);
+            // nn4->prefix_len = common_prefix_len;
+            memcpy(nn4->prefix, &k[depth], nn4->prefix_len);
 
-            depth = depth + common_prefix_len;
+            depth = depth + nn4->prefix_len;
             nn4->addChild(ptr_in_parent, k[depth], new_leaf);
             nn4->addChild(ptr_in_parent, k2[depth], node);
             *ptr_in_parent = nn4;
