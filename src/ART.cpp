@@ -52,14 +52,12 @@ bool ART::insert(Key &k, uint64_t value) {
             Node4 *nn4 = new Node4();
             Key &k2 = this->val2key[Node::getLeafValue(node)]; // == loadKey()
 
-            // uint32_t common_prefix_len = 0;
             uint32_t common_limit = std::min(k.getKeyLen(), k2.getKeyLen());
             while (depth + nn4->prefix_len < common_limit &&
                    k[depth + nn4->prefix_len] == k2[depth + nn4->prefix_len]) {
                 nn4->prefix_len++;
             }
 
-            // nn4->prefix_len = common_prefix_len;
             memcpy(nn4->prefix, &k[depth], nn4->prefix_len);
 
             depth = depth + nn4->prefix_len;
