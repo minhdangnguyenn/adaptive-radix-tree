@@ -23,7 +23,7 @@ __attribute__((hot)) uint64_t ART::lookup(Key &k) {
 
         // find child for the next key byte
         Node **child = node->findChild(k[next_depth]);
-        if (child == nullptr || *child == nullptr) {
+        if (*child == nullptr) {
             return NULL_;
         }
 
